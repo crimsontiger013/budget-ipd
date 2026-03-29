@@ -476,8 +476,6 @@ function BUView({state, dispatch, budget, M, budgetLines, buList, buStructure, A
                       const val = budget.getBUValue(bu, line, yr, buStructure);
                       const consolVal = budget.getConsolidatedValue(line, yr, buList, buStructure);
                       const pctVal = consolVal ? val / consolVal : 0;
-                      const hasAnyValue = BUDGET_YEARS.some(y => Math.abs(budget.getBUValue(bu, line, y, buStructure)) >= 1);
-                      if (!hasAnyValue && Math.abs(consolVal) < 1) return null;
                       return (
                         <tr key={line} className={i % 2 === 0 ? 'bg-gray-50/50' : 'bg-white'}>
                           <td className="py-2 px-4 text-gray-700 w-60 truncate">{line}</td>
@@ -648,8 +646,6 @@ function UnitView({state, dispatch, budget, M, unitBudgets, budgetLines, ALL_LIN
                     const val = budget.getUnitValue(unit, line, yr);
                     const allocated = unitBudgets[unit]?.[line]?.[yr] || 0;
                     const isOvr = budget.isOverridden(unit, line, yr);
-                    const hasAnyValue = BUDGET_YEARS.some(y => Math.abs(budget.getUnitValue(unit, line, y)) >= 1 || Math.abs(unitBudgets[unit]?.[line]?.[y] || 0) >= 1);
-                    if (!hasAnyValue) return null;
                     return (
                       <tr key={line} className={`${i % 2 === 0 ? 'bg-gray-50/50' : 'bg-white'} ${canEdit ? 'hover:bg-blue-50/30' : ''}`}>
                         <td className="py-2 px-4 text-gray-700 w-56 truncate">{line}</td>
@@ -886,36 +882,42 @@ function ScenarioBar({state, dispatch}) {
 // ============================================================================
 function ExportButtons({state, budget, budgetLines, buList, buStructure, allUnits, ALL_LINES, consolidated, historical, unitBudgets}) {
   const exportCSV = useCallback(() => {
-    const yr = state.year;
-    const rows = [['Niveau','Business Unit','Unité','Ligne Budgétaire','Année','Total']];
-    ALL_LINES.forEach(l => rows.push(['Consolidé','','',l, yr, budget.getConsolidatedValue(l, yr, buList, buStructure)]));
-    buList.forEach(bu => ALL_LINES.forEach(l => rows.push(['BU', bu, '', l, yr, budget.getBUValue(bu, l, yr, buStructure)])));
+    const years = BUDGET_YEARS;
+    const yearHeaders = years.map(y => `Total ${y}`);
+    const rows = [['Niveau','Business Unit','Unité','Ligne Budgétaire', ...yearHeaders]];
+    ALL_LINES.forEach(l => rows.push(['Consolidé','','',l, ...years.map(y => budget.getConsolidatedValue(l, y, buList, buStructure))]));
+    buList.forEach(bu => ALL_LINES.forEach(l => rows.push(['BU', bu, '', l, ...years.map(y => budget.getBUValue(bu, l, y, buStructure))])));
     allUnits.forEach(({name, bu}) => ALL_LINES.forEach(l => {
-      const v = budget.getUnitValue(name, l, yr);
-      if (Math.abs(v) > 0) rows.push(['Unité', bu, name, l, yr, v]);
+      const vals = years.map(y => budget.getUnitValue(name, l, y));
+      if (vals.some(v => Math.abs(v) > 0)) rows.push(['Unité', bu, name, l, ...vals]);
     }));
     const csv = rows.map(r => r.map(c => typeof c === 'string' && c.includes(',') ? `"${c}"` : c).join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `budget_ipd_${yr}.csv`; a.click();
+    a.href = url; a.download = `budget_ipd_${years.join('-')}.csv`; a.click();
     URL.revokeObjectURL(url);
-  }, [state.year, budget, budgetLines, buList, buStructure, allUnits, ALL_LINES]);
+  }, [budget, budgetLines, buList, buStructure, allUnits, ALL_LINES]);
 
   const exportPDF = useCallback(async () => {
-    const mod = await import('@/lib/export-pdf');
-    const commonData = { year: state.year, budget, budgetLines, buList, buStructure, inMillions: state.inMillions };
-    switch (state.view) {
-      case 'consolidated': return mod.exportConsolidatedPDF({ ...commonData, historical, consolidated });
-      case 'bu': return mod.exportBUViewPDF({ ...commonData, selectedBU: state.selectedBU });
-      case 'unit': return mod.exportUnitViewPDF({ ...commonData, selectedUnit: state.selectedUnit, selectedBU: state.selectedBU, unitBudgets });
-      case 'dashboard': return mod.exportDashboardPDF({ ...commonData, allUnits, historical, consolidated });
+    try {
+      const mod = await import('@/lib/export-pdf');
+      const commonData = { year: state.year, years: BUDGET_YEARS, budget, budgetLines, buList, buStructure, inMillions: state.inMillions };
+      switch (state.view) {
+        case 'consolidated': return mod.exportConsolidatedPDF({ ...commonData, historical, consolidated });
+        case 'bu': return mod.exportBUViewPDF({ ...commonData, selectedBU: state.selectedBU });
+        case 'unit': return mod.exportUnitViewPDF({ ...commonData, selectedUnit: state.selectedUnit, selectedBU: state.selectedBU, unitBudgets });
+        case 'dashboard': return mod.exportDashboardPDF({ ...commonData, allUnits, historical, consolidated });
+      }
+    } catch (err) {
+      console.error('PDF export error:', err);
+      alert('Erreur lors de l\'export PDF. Consultez la console pour plus de détails.');
     }
   }, [state, budget, budgetLines, buList, buStructure, allUnits, consolidated, historical, unitBudgets]);
 
   const exportExcel = useCallback(async () => {
     const mod = await import('@/lib/export-excel');
-    const commonData = { year: state.year, budget, budgetLines, buList, buStructure, inMillions: state.inMillions };
+    const commonData = { year: state.year, years: BUDGET_YEARS, budget, budgetLines, buList, buStructure, inMillions: state.inMillions };
     switch (state.view) {
       case 'consolidated': return mod.exportConsolidatedExcel({ ...commonData, historical, consolidated });
       case 'bu': return mod.exportBUViewExcel({ ...commonData, selectedBU: state.selectedBU });
